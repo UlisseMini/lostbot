@@ -1,12 +1,14 @@
 import discord
 import dotenv
 import os
+import asyncio
+
 
 dotenv.load_dotenv()
 
 TOKEN = os.environ['DISCORD_BOT_TOKEN']
 GUILD_ID = os.environ['GUILD_ID']
-THREAD_ONLY_CATEGORY_ID = os.environ['THREAD_ONLY_CATEGORY_ID']
+THREAD_ONLY_CATEGORY_ID = int(os.environ['THREAD_ONLY_CATEGORY_ID'])
 
 bot = discord.Bot(intents=discord.Intents.all())
 
@@ -28,6 +30,8 @@ async def on_message(message: discord.Message):
     # create a thread if it's a thread only channel!
     if isinstance(message.channel, discord.TextChannel):
         if message.channel.category_id == THREAD_ONLY_CATEGORY_ID:
+            # discord UI glitch when you create a thread too fast, this is a mitigation.
+            await asyncio.sleep(1)
             name = message.content[:50]
             thread = await message.create_thread(name=name, auto_archive_duration=60)
             await thread.send(f"Thread created (thread only channel)")
