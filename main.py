@@ -35,7 +35,8 @@ async def on_message(message: discord.Message):
         if message.channel.category_id == THREAD_ONLY_CATEGORY_ID:
             # discord UI glitch when you create a thread too fast, this is a mitigation.
             await asyncio.sleep(1)
-            name = message.content[:50]
+            # or in case of image-only message
+            name = message.content[:50] or "New Thread"
             thread = await message.create_thread(name=name, auto_archive_duration=60)
             await thread.send(f"Thread created (thread only channel)")
 
