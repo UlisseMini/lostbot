@@ -4,15 +4,17 @@ import random
 from collections import defaultdict
 from dataclasses import dataclass
 from dataclasses_json import dataclass_json
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, TYPE_CHECKING
 import copy
-from util import add_save_load
+from util import AddSaveLoad
 
 
-@add_save_load("history.json", "1on1-history")
 @dataclass_json
 @dataclass
-class History:
+class History(AddSaveLoad):
+    filename = "history.json"
+    channame = "1on1-history"
+
     # this is mapping from user to list of users they were paired with, can include repeat pairings
     # TODO in the future keep track of if they actually met and then don't add users who were paired but didn't meet to history
     histories: Dict[int, List[int]]
@@ -53,9 +55,10 @@ class History:
     def pair_people(self, opt_in=None, filler=None):
         """Pair people by updating history and selecting least frequent pairs. Use opt_in if we only wanted to pair a subset of people."""
         # make a deep copy and then filter to only used opted in people
-        for p in opt_in:
-            if p not in self.histories:
-                self.histories[p] = []
+        if opt_in:
+            for p in opt_in:
+                if p not in self.histories:
+                    self.histories[p] = []
         h = copy.deepcopy(self.histories)
         if opt_in:
             h = {p:self.histories[p] for p in self.histories if p in opt_in}
@@ -63,17 +66,16 @@ class History:
         unpaired = []
         # if we have an odd number and a filler id, take a random person and match with filler (making sure that the random person is not a filler)
         if len(h) % 2 == 1:
-            person = random.choice(h)
+            person = random.choice(list(h.keys()))
             if not filler:
-                unparired.append(person)
+                unpaired.append(person)
+                del h[person]
             else:
                 while person == filler:
-                    person = random.choice(h)
+                    person = random.choice(list(h.keys()))
                 pairs.append((person, filler))
-                print("doing filler pair b/c odd number", person, filler)
                 self.update_history((person, filler))
-                h.remove(person)
-                h.remove(filler)
+                del h[person]
             
         used = set()
 

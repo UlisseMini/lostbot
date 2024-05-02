@@ -6,9 +6,9 @@ import os
 import asyncio
 from dataclasses import dataclass, field
 from dataclasses_json import dataclass_json
-from typing import Tuple, List, Dict, Optional
+from typing import Tuple, List, Dict, Optional, TYPE_CHECKING
 from pairing import History
-from util import add_save_load
+from util import AddSaveLoad
 
 dotenv.load_dotenv()
 
@@ -57,10 +57,11 @@ async def hello(ctx):
 
 # the one on one stuff
 
-@add_save_load("pairings.json", "1on1-pairs")
 @dataclass_json
 @dataclass
-class WeeklyPairings:
+class WeeklyPairings(AddSaveLoad):
+    filename = "pairings.json"
+    channame = "1on1-pairs"
     # people who are unpaired
     # 2 ways to be on this list:
     # there are an odd number
@@ -105,7 +106,7 @@ async def show_1on1_signed_up(ctx: discord.Interaction):
 
 
 
-async def display_pairs(guild, pairings: WeeklyPairings, user_asked: int = None, always_ping=False, ctx=None, channel: discord.TextChannel = None):
+async def display_pairs(guild, pairings: WeeklyPairings, user_asked: Optional[int] = None, always_ping=False, ctx=None, channel: discord.TextChannel = None):
     if not (bool(ctx) ^ bool(channel)):
         raise ValueError("Ctx xor channel must be provided")
     # for each pair, get the user from their discriminator and mention them
