@@ -146,7 +146,7 @@ async def pair_weekly_users(guild: discord.Guild):
         unpaired = set(wps.unpaired)
     else:
         unpaired = set()
-    opt_in = list(set([member.id for member in guild.members if discord.utils.get(member.roles, name="1on1")]) + unpaired)
+    opt_in = list(set([member.id for member in guild.members if discord.utils.get(member.roles, name="1on1")]).union(unpaired))
     pairs, unpaired = hist.pair_people(opt_in=opt_in)
     wps = WeeklyPairings(unpaired=unpaired, paired=pairs)
     c1 = wps.save(guild)
@@ -206,7 +206,7 @@ async def weekly_task():
             next_run = next_friday()
             await asyncio.sleep((next_run - datetime.now()).total_seconds())
             # get the 1-1s channel
-            wps = pair_weekly_users(guild)
+            wps = await pair_weekly_users(guild)
             chan = one_on_one_chan(guild)
             await display_pairs(guild, wps, always_ping=True, channel=chan)
 
