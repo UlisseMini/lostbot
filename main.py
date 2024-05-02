@@ -4,8 +4,11 @@ import random
 from datetime import datetime, timedelta
 import os
 import asyncio
-import json
-from pairing import PairingAlgorithm
+from dataclasses import dataclass, field
+from dataclasses_json import dataclass_json
+from typing import Tuple, List, Dict, Optional
+from pairing import History
+from util import add_save_load
 
 dotenv.load_dotenv()
 
@@ -15,6 +18,13 @@ THREAD_ONLY_CATEGORY_ID = int(os.environ["THREAD_ONLY_CATEGORY_ID"])
 
 bot = discord.Bot(intents=discord.Intents.all())
 
+# only ping the user if they asked
+def mention_(guild, uid: int, asked=None, always_ping = False):
+    user = discord.utils.get(guild.members, id=uid)
+    if always_ping or user.id == asked:
+        return user.mention
+    else:
+        return f"@{user.display_name}"
 
 @bot.event
 async def on_ready():
@@ -45,113 +55,131 @@ async def on_message(message: discord.Message):
 async def hello(ctx):
     await ctx.respond("Hello!")
 
+# the one on one stuff
 
+@add_save_load("pairings.json", "1on1-pairs")
+@dataclass_json
+@dataclass
+class WeeklyPairings:
+    # people who are unpaired
+    # 2 ways to be on this list:
+    # there are an odd number
+    # even number but you already had 1-on-1 with other people/person
+    unpaired: List[int] = field(default_factory=list)
+    # people who are paired this week
+    paired: List[Tuple[int, int]] = field(default_factory=list)
+
+
+# the `1on1` role is to be autopaired every week
 @bot.slash_command(guild_ids=[GUILD_ID])
 async def add_1_on_1(ctx: discord.Interaction):
     # add 1on1 role to user
     role = discord.utils.get(ctx.guild.roles, name="1on1")
     await ctx.author.add_roles(role)
     await ctx.respond("You have signed up for 1on1s!")
-
-
 @bot.slash_command(guild_ids=[GUILD_ID])
 async def remove_1_on_1(ctx):
-    # remove 1on1 role from user
     role = discord.utils.get(ctx.guild.roles, name="1on1")
     await ctx.author.remove_roles(role)
     await ctx.respond("You have removed yourself from 1on1s!")
 
+@bot.slash_command(guild_ids=[GUILD_ID])
+async def open_to_extra_1_on_1(ctx: discord.Interaction):
+    # add 1on1filler role to user
+    role = discord.utils.get(ctx.guild.roles, name="1on1filler")
+    await ctx.author.add_roles(role)
+    await ctx.respond("You have signed up to be available for more 1on1s (for example when there are an odd number)!")
+@bot.slash_command(guild_ids=[GUILD_ID])
+async def remove_extra_1_on_1(ctx: discord.Interaction):
+    role = discord.utils.get(ctx.guild.roles, name="1on1filler")
+    await ctx.author.remove_roles(role)
+    await ctx.respond("You have removed yourself from being available for extra 1on1s!")
+
 
 @bot.slash_command(guild_ids=[GUILD_ID])
-async def show_1on1_signed_up(ctx):
+async def show_1on1_signed_up(ctx: discord.Interaction):
     # show all users with 1on1 role
     role = discord.utils.get(ctx.guild.roles, name="1on1")
-    users = [member.name for member in ctx.guild.members if role in member.roles]
-    await ctx.respond(f"Users with 1on1 role: {', '.join(users)}")
+    users = [member.display_name for member in ctx.guild.members if role in member.roles]
+    await ctx.respond(f"Users who will get pinged weekly to remind to sign up for 1-on-1s {', '.join(users)}")
 
 
-async def pair_for_1on1s(guild):
-    role = discord.utils.get(guild.roles, name="1on1")
-    users = [member.id for member in guild.members if role in member.roles]
-    algorithm = PairingAlgorithm(users)
-    # get the last message from "1on1-history" and load it into history
-    channel = discord.utils.get(guild.channels, name="1on1-history")
-    last_message = channel.last_message
-    if last_message:
-        algorithm.load_history(last_message.content)
-    else:
-        algorithm.load_history("{}")
-    # find all the users with role 1on1filler and pick a random one
-    filler_role = discord.utils.get(guild.roles, name="1on1filler")
-    filler_id = [member.id for member in guild.members if filler_role in member.roles]
-    random.shuffle(filler_id)
-    filler_id = filler_id[0] if filler_id else None
-    pairs = algorithm.pair_people(filler=filler_id)
-    h = algorithm.serialize_history()
-    # save the serialized history into a message to load later
-    channel = discord.utils.get(guild.channels, name="1on1-history")
-    await channel.send(h)
-    # save the pairs into "1on1-pairs"
-    channel = discord.utils.get(guild.channels, name="1on1-pairs")
-    await channel.send(json.dumps(pairs))
-    return pairs
 
-def mention_(user, safe=False):
-    mention = user.mention
-    if safe:
-        # just return @ and then the user's nick
-        return f"@{user.display_name}"
-    else:
-        return user.mention
-
-
-async def display_pairs(guild, pairs, user_asked=None, ctx=None, channel=None):
-    if ctx and channel:
-        raise ValueError("Only one of 'ctx' and 'channel' should be provided, not both.")
-    if not ctx and not channel:
-        raise ValueError("Either 'ctx' or 'channel' must be provided.")
+async def display_pairs(guild, pairings: WeeklyPairings, user_asked: int = None, always_ping=False, ctx=None, channel: discord.TextChannel = None):
+    if not (bool(ctx) ^ bool(channel)):
+        raise ValueError("Ctx xor channel must be provided")
     # for each pair, get the user from their discriminator and mention them
-    users = []
-    for pair in pairs:
-        user1 = discord.utils.get(guild.members, id=pair[0])
-        user2 = discord.utils.get(guild.members, id=pair[1])
-        if user_asked:
-            # basically, we don't want to mention users if only a single user asked what the pairs were
-            if user_asked == pair[0]:
-                users.append(f"{mention_(user1)} — {mention_(user2, safe=True)}")
-            elif user_asked == pair[1]:
-                users.append(f"{mention_(user1, safe=True)} — {mention_(user2)}")
-            else:
-                users.append(f"{mention_(user1, safe=True)} — {mention_(user2, safe=True)}")
-        else:
-            users.append(f"{mention_(user1)} — {mention_(user2)}")
+    s = ""
+    if len(pairings.paired) > 0:
+        s += "*1on1 pairs:*\n"
+        for pair in pairings.paired:
+            s += f"{mention_(guild, pair[0], asked=user_asked, always_ping=always_ping)} — {mention_(guild, pair[1], asked=user_asked, always_ping=always_ping)}\n"
+    elif len(pairings.unpaired) > 0:
+        s += "*waiting to be paired:*\n"
+        for user_id in pairings.unpaired:
+            s += f"{mention_(guild, user_id, asked=user_asked, always_ping=always_ping)}\n"
+    else:
+        s += "No pairings made yet"
 
     if ctx:
-        await ctx.respond(f"1on1 pairs: {', '.join(users)}")
+        await ctx.respond(s)
     elif channel:
-        await channel.send(f"1on1 pairs: {', '.join(users)}")
+        await channel.send(s)
+    else:
+        assert False # we need ctx or channel
+
 
 
 @bot.slash_command(guild_ids=[GUILD_ID])
-async def pair_1on1s(ctx):
-    # require admin
+async def show_1on1_pairs(ctx: discord.Interaction):
+    wps = await WeeklyPairings.load(ctx.guild)
+    if wps:
+        await display_pairs(ctx.guild, wps, user_asked=ctx.author.id, ctx=ctx)
+    else:
+        await ctx.respond("No pairs found")
+
+async def pair_weekly_users(guild: discord.Guild):
+    hist = await History.load_or_create_new(guild)
+    wps = await WeeklyPairings.load(guild)
+    if wps:
+        # also include people who were waiting to be paired last time
+        unpaired = set(wps.unpaired)
+    else:
+        unpaired = set()
+    opt_in = list(set([member.id for member in guild.members if discord.utils.get(member.roles, name="1on1")]) + unpaired)
+    pairs, unpaired = hist.pair_people(opt_in=opt_in)
+    wps = WeeklyPairings(unpaired=unpaired, paired=pairs)
+    c1 = wps.save(guild)
+    c2 = hist.save(guild)
+    await asyncio.gather(c1, c2)
+    return wps
+
+@bot.slash_command(guild_ids=[GUILD_ID])
+async def pairme(ctx: discord.Interaction):
+    hist = await History.load_or_create_new(ctx.guild)
+    pairs = await WeeklyPairings.load(ctx.guild)
+    person = ctx.author.id
+    if any(person in pair for pair in pairs.paired):
+        # TODO should we allow anyone to just sink all the pairs?
+        await ctx.respond("You are already paired this week!")
+        return
+    unused = [pairs.unpaired, [member.id for member in ctx.guild.members if discord.utils.get(member.roles, name="1on1filler")]]
+    other = hist.pair_person(person, unused)
+    if other == None:
+        await ctx.respond("No one to pair with, sorry :(")
+        return
+    await hist.save(ctx.guild)
+    pairs.paired.append((person, other))
+    await pairs.save(ctx.guild)
+    await ctx.respond(f"Paired {mention_(ctx.guild, person, always_ping=True)} with {mention_(ctx.guild, other, always_ping=True)}")
+
+@bot.slash_command(guild_ids=[GUILD_ID])
+async def pair_1on1s(ctx: discord.Interaction):
     if not ctx.author.guild_permissions.administrator:
         await ctx.respond("You must be an admin to run this command.")
         return
-    pairs = await pair_for_1on1s(ctx.guild)
-    await display_pairs(ctx.guild, pairs, ctx=ctx)
-
-
-@bot.slash_command(guild_ids=[GUILD_ID])
-async def show_1on1_pairs(ctx):
-    channel = discord.utils.get(ctx.guild.channels, name="1on1-pairs")
-    last_message = channel.last_message
-    if last_message:
-        pairs_json = last_message.content
-        pairs = json.loads(pairs_json)
-        await display_pairs(ctx.guild, pairs, user_asked=ctx.author.id, ctx=ctx)
-    else:
-        await ctx.respond("No pairs found")
+    wps = await pair_weekly_users(ctx.guild)
+    await display_pairs(ctx.guild, wps, ctx=ctx, always_ping=True)
 
 
 def next_friday():
@@ -165,6 +193,11 @@ def next_friday():
     print(f"running pairs in {r}")
     return r
 
+def one_on_one_chan(guild: discord.Guild):
+    return discord.utils.get(guild.channels, name="1-1s")
+
+# a dict mapping guilds to the message we are listening for reacts on each one
+current_messages: Dict[discord.Guild, int] = {}
 
 async def weekly_task():
     await bot.wait_until_ready()
@@ -172,12 +205,10 @@ async def weekly_task():
         while not bot.is_closed():
             next_run = next_friday()
             await asyncio.sleep((next_run - datetime.now()).total_seconds())
-            # get the last message in 1-1s and then get a context from that
-            pairs = await pair_for_1on1s(guild)
             # get the 1-1s channel
-            channel = discord.utils.get(guild.channels, name="1-1s")
-            await display_pairs(guild, pairs, channel=channel)
-
+            wps = pair_weekly_users(guild)
+            chan = one_on_one_chan(guild)
+            await display_pairs(guild, wps, always_ping=True, channel=chan)
 
 
 bot.loop.create_task(weekly_task())
