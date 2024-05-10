@@ -185,12 +185,13 @@ async def pair_1on1s(ctx: discord.Interaction):
 
 def next_friday():
     now = datetime.now()
+    TIME_ON_FRIDAY_TO_RUN = 15 # UTC, so we don't wake up Americas
     # 4 represents Friday, calculating days until the next Friday
     days_until_friday = (4 - now.weekday()) % 7
-    if days_until_friday == 0 and now.hour >= 9:  # If today is Friday and it's past 9 AM
+    if days_until_friday == 0 and now.hour >= TIME_ON_FRIDAY_TO_RUN:
         days_until_friday = 7  # Wait until next Friday
     next_friday = now + timedelta(days=days_until_friday)
-    r = next_friday.replace(hour=7, minute=0, second=0, microsecond=0)  # Set time to 7:00 AM
+    r = next_friday.replace(hour=TIME_ON_FRIDAY_TO_RUN, minute=0, second=0, microsecond=0)  # Set time to 7:00 AM
     print(f"running pairs in {r}")
     return r
 
@@ -205,7 +206,10 @@ async def weekly_task():
     for guild in bot.guilds:
         while not bot.is_closed():
             next_run = next_friday()
-            await asyncio.sleep((next_run - datetime.now()).total_seconds())
+            amt_to_sleep = (next_run - datetime.now()).total_seconds()
+            if amt_to_sleep < 30 * 60: # this could get triggered in some weird timezone/daylight savings situations, don't start bot <30mins before TIME_ON_FRIDAY_TO_RUN on friday
+                continue
+            await asyncio.sleep(amt_to_sleep)
             # get the 1-1s channel
             wps = await pair_weekly_users(guild)
             chan = one_on_one_chan(guild)
