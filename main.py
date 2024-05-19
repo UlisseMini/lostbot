@@ -48,7 +48,7 @@ async def on_message(message: discord.Message):
             # or in case of image-only message
             name = message.content[:50] or "New Thread"
             thread = await message.create_thread(name=name, auto_archive_duration=60)
-            await thread.send(f"Thread created (thread only channel)")
+            await thread.send(f"Thread created (thread only channel)", allowed_mentions={parse:[]}) # Don't ping the user (not sure if this will work)
 
 
 @bot.slash_command(guild_ids=[GUILD_ID])
