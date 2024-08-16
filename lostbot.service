@@ -1,0 +1,14 @@
+[Unit]
+Description=LostBot Service
+After=network.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/lostbot
+ExecStart=/bin/bash -c '. ./.venv/bin/activate && python main.py'
+Restart=on-failure
+RestartSec=5s
+
+[Install]
+WantedBy=multi-user.target
