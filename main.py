@@ -142,13 +142,24 @@ async def show_1on1_pairs(ctx: discord.Interaction):
 async def pair_weekly_users(guild: discord.Guild):
     hist = await History.load_or_create_new(guild)
     wps = await WeeklyPairings.load(guild)
+    
+    # current users who have opted in
+    role = discord.utils.get(guild.roles, name="1on1")
+    current_opt_in = [member.id for member in guild.members if role in member.roles]
+    
     if wps:
-        # also include people who were waiting to be paired last time
-        unpaired = set(wps.unpaired)
+        # only be including unpaired users who are still opted in
+        still_opted_in_unpaired = [uid for uid in wps.unpaired if uid in current_opt_in]
+        # combine with currently opted in users
+        opt_in = list(set(current_opt_in + still_opted_in_unpaired))
     else:
-        unpaired = set()
-    opt_in = list(set([member.id for member in guild.members if discord.utils.get(member.roles, name="1on1")]).union(unpaired))
-    pairs, unpaired = hist.pair_people(opt_in=opt_in)
+        opt_in = current_opt_in
+    
+    # get filler users
+    filler_role = discord.utils.get(guild.roles, name="1on1filler") 
+    filler_users = [member.id for member in guild.members if filler_role in member.roles] if filler_role else []
+    
+    pairs, unpaired = hist.pair_people(opt_in=opt_in, filler_users=filler_users)
     wps = WeeklyPairings(unpaired=unpaired, paired=pairs)
     c1 = wps.save(guild)
     c2 = hist.save(guild)
@@ -164,7 +175,12 @@ async def pairme(ctx: discord.Interaction):
         # TODO should we allow anyone to just sink all the pairs?
         await ctx.respond("You are already paired this week!")
         return
-    unused = [pairs.unpaired, [member.id for member in ctx.guild.members if discord.utils.get(member.roles, name="1on1filler")]]
+    
+    # get current filler users
+    filler_role = discord.utils.get(ctx.guild.roles, name="1on1filler")
+    filler_users = [member.id for member in ctx.guild.members if filler_role in member.roles] if filler_role else []
+    
+    unused = [pairs.unpaired, filler_users]
     other = hist.pair_person(person, unused)
     if other == None:
         await ctx.respond("No one to pair with, sorry :(")
