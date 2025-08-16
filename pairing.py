@@ -49,33 +49,52 @@ class History(AddSaveLoad):
     def update_history(self, pair):
         """Update the history with the new pair."""
         person1, person2 = pair
+        if person1 not in self.histories:
+            self.histories[person1] = []
+        if person2 not in self.histories:
+            self.histories[person2] = []
         self.histories[person1].append(person2)
         self.histories[person2].append(person1)
 
-    def pair_people(self, opt_in=None, filler=None):
+    def pair_people(self, opt_in=None, filler_users=None):
         """Pair people by updating history and selecting least frequent pairs. Use opt_in if we only wanted to pair a subset of people."""
-        # make a deep copy and then filter to only used opted in people
+        if filler_users is None:
+            filler_users = []
+            
+        # make sure all opt_in people have history entries
         if opt_in:
             for p in opt_in:
                 if p not in self.histories:
                     self.histories[p] = []
-        h = copy.deepcopy(self.histories)
+        
+        # create working copy with only opted-in people
         if opt_in:
-            h = {p:self.histories[p] for p in self.histories if p in opt_in}
+            h = {p: self.histories[p] for p in opt_in}
+        else:
+            h = copy.deepcopy(self.histories)
+        
         pairs = []
         unpaired = []
-        # if we have an odd number and a filler id, take a random person and match with filler (making sure that the random person is not a filler)
-        if len(h) % 2 == 1:
+        
+        # if we have an odd number and filler users available, take a random person and match with a filler
+        if len(h) % 2 == 1 and filler_users:
             person = random.choice(list(h.keys()))
-            if not filler:
-                unpaired.append(person)
-                del h[person]
+            # Find best filler based on history (least paired with this person)
+            if person in self.histories:
+                filler_counts = [(filler, sum(1 for x in self.histories[person] if x == filler)) for filler in filler_users]
             else:
-                while person == filler:
-                    person = random.choice(list(h.keys()))
-                pairs.append((person, filler))
-                self.update_history((person, filler))
-                del h[person]
+                filler_counts = [(filler, 0) for filler in filler_users]
+            filler_counts.sort(key=lambda x: x[1])  # sort by count (ascending)
+            filler = filler_counts[0][0]
+            
+            pairs.append((person, filler))
+            self.update_history((person, filler))
+            del h[person]
+        elif len(h) % 2 == 1:
+            # No filler available, someone will be unpaired
+            person = random.choice(list(h.keys()))
+            unpaired.append(person)
+            del h[person]
             
         used = set()
 
@@ -89,24 +108,28 @@ class History(AddSaveLoad):
             else:
                 # append the rest of the people to unpaired
                 unpaired.extend(set(h.keys()) - used)
-
-        # update self.histories with h
-        for person in h:
-            self.histories[person] = h[person]
+                break
 
         return pairs, unpaired
+    
     def pair_person(self, person: int, unused: List[List[int]]):
         """Pair a person with the least frequent person in the subarrays of unused. Start with unused[0], but if there are no people in that, go to the rest of unused.
         unused[0] is the people who were left unpaired. unused[1] is the people who can always be paired."""
         for group in unused:
-            try: group.remove(person)
-            except: pass
-            if len(group) == 0: continue
-            group.shuffle()
-            group.sort(key=lambda x: sum(1 for y in self.histories[x] if y == person))
+            try: 
+                group.remove(person)
+            except: 
+                pass
+            if len(group) == 0: 
+                continue
+            random.shuffle(group)
+            if person in self.histories:
+                group.sort(key=lambda x: sum(1 for y in self.histories[person] if y == x))
             p = group[0]
             self.update_history((person, p))
             return p
+        return None
+        
     @classmethod
     async def load_or_create_new(cls, guild):
         hist = await cls.load(guild)
